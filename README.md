@@ -16,6 +16,16 @@ I attempted to differentiate the meanings of the target word ("꼬리" in this c
 
 Given that LLMs are based on transformers and operate using some form of Bayesian random sampling, I speculated that there might be a more efficient and intuitive method to uncover meaning structures. Therefore, I introduced a "4th method" that leverages language models to specify each meaning of the target word. This repository explains this 4th method and provides sample code.
 
+
+## BERT-Kmean(4-1)
+This method tries to make unsupervised learning method(k-mean) toward context vectors so that could found out distinct meaning map. However, it failed to make certain level for confident to be utilized.
+
+## BERT-HDBSCAN(4-1h)
+This method was advanced version from 4-1, which used HDBSCAN instead of k-mean for clustering. HDBSCAN method was hierarchical method of DBSCAN, and known as clustering method that could be more flexible for density and each groups #of data. However, it eventually failed to reach the ideal level for confidently using those for split of meaning.
+
+## BERT-Generative(4-2)
+This method, instead of classification models above, tried to make use of vector space itself. This was made for helping people labeling those meanings for each cases in corpus. It tries to keep finding out distinct sentences from vector space, so that user could get higher chances for labeling each sentences.
+
 ## Environment
 
 For this project, I used my personal workstation with the following specifications:
