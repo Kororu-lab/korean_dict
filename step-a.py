@@ -17,6 +17,7 @@ from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
 from tokenizers.processors import BertProcessing
+import gc  # Garbage collector interface
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,18 +25,18 @@ logger = logging.getLogger()
 
 # Hyperparameters
 CONTEXT_LENGTH = 30
-BATCH_SIZE = 25  # Adjusted batch size to manage memory
-REMOVE_DUPLICATES = True  # Set to False to keep duplicates
-USE_SUBSET = False  # Set to True to use a smaller subset for debugging
+BATCH_SIZE = 10  # Further reduced batch size to manage memory
+REMOVE_DUPLICATES = True
+USE_SUBSET = False
 KEYWORD = "꼬리"
-SIGMA = 1.0  # Gaussian weighting parameter
-TOKEN_WINDOW = 15  # Consider only this range of tokens around the keyword
-APPLY_SIGMA = False  # Option to apply Gaussian weighting
-MAX_LENGTH = 300  # BERT 모델의 최대 길이
-SPLIT_LONG_SENTENCES = True  # 긴 문장을 자르는 옵션
-MAX_SENTENCE_LENGTH = 30  # 잘라낼 최대 문장 길이
-SPLIT_AROUND_KEYWORD = 30  # 키워드를 중심으로 자르는 길이
-USE_BPE = True  # Use BPE tokenization if True
+SIGMA = 1.0
+TOKEN_WINDOW = 10
+APPLY_SIGMA = False
+MAX_LENGTH = 300
+SPLIT_LONG_SENTENCES = True
+MAX_SENTENCE_LENGTH = 30
+SPLIT_AROUND_KEYWORD = 30
+USE_BPE = True
 
 # Ensure joblib temporary directory is set
 temp_dir = './joblib_temp'
@@ -54,14 +55,12 @@ model = BertModel.from_pretrained('beomi/kcbert-large').to(device)
 bpe_tokenizer = None
 if USE_BPE:
     if not os.path.exists('bpe_tokenizer.json'):
-        # Train BPE tokenizer
         bpe_tokenizer = Tokenizer(BPE())
         bpe_tokenizer.pre_tokenizer = Whitespace()
         trainer = BpeTrainer(special_tokens=["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]"])
         bpe_tokenizer.train(files=['./data/preprocessed_corpus.txt'], trainer=trainer)
         bpe_tokenizer.save('bpe_tokenizer.json')
     else:
-        # Load trained BPE tokenizer
         bpe_tokenizer = Tokenizer.from_file('bpe_tokenizer.json')
     bpe_tokenizer.post_processor = BertProcessing(("[SEP]", 102), ("[CLS]", 101))
 
@@ -91,6 +90,7 @@ def tokenize(sentences, use_bpe=USE_BPE):
     else:
         return [bert_tokenizer.tokenize(sentence) for sentence in sentences]
 
+# Function to generate weighted embeddings with TF-IDF
 # Function to generate weighted embeddings with TF-IDF
 def get_weighted_embeddings(sentences, tfidf_vectorizer, tfidf_matrix, keyword=KEYWORD, sigma=SIGMA, token_window=TOKEN_WINDOW, apply_sigma=APPLY_SIGMA, use_bpe=USE_BPE):
     tokens = tokenize(sentences, use_bpe=use_bpe)
@@ -122,7 +122,14 @@ def get_weighted_embeddings(sentences, tfidf_vectorizer, tfidf_matrix, keyword=K
                 distance_weights = np.ones_like(distances)
             full_weight = np.ones(token_length)
             full_weight[start_index:end_index] = distance_weights
-            full_weight = full_weight[:len(tfidf_weights)] * tfidf_weights
+            
+            # Adjust full_weight length to match tfidf_weights length
+            if len(full_weight) > len(tfidf_weights):
+                full_weight = full_weight[:len(tfidf_weights)]
+            else:
+                full_weight = np.pad(full_weight, (0, len(tfidf_weights) - len(full_weight)), 'constant')
+            
+            full_weight = full_weight * tfidf_weights
             weights.append(full_weight)
         else:
             weights.append(np.ones(token_length))
@@ -178,6 +185,7 @@ for i in tqdm(range(0, len(sentences_with_tail), BATCH_SIZE)):
     batch_sentences = sentences_with_tail[i:i+BATCH_SIZE]
     batch_embeddings = get_weighted_embeddings(batch_sentences, tfidf_vectorizer, tfidf_matrix, apply_sigma=APPLY_SIGMA, use_bpe=USE_BPE)
     embeddings.append(batch_embeddings)
+    gc.collect()  # Collect garbage after each batch to free up memory
 embeddings = np.vstack(embeddings)
 
 # Save embeddings
@@ -243,3 +251,4 @@ logger.info("Sample sentences per cluster saved to ./results/method_sample_sente
 # Clean up temporary files
 import shutil
 shutil.rmtree(temp_dir)
+
