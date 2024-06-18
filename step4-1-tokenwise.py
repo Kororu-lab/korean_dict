@@ -26,13 +26,13 @@ REMOVE_DUPLICATES = True  # Set to False to keep duplicates
 USE_SUBSET = False  # Set to True to use a smaller subset for debugging
 KEYWORD = "꼬리"
 SIGMA = 1.0  # Gaussian weighting parameter
-TOKEN_WINDOW = 30  # Consider only this range of tokens around the keyword
-APPLY_SIGMA = True  # Option to apply Gaussian weighting
-MAX_LENGTH = 300  # BERT 모델의 최대 길이
+TOKEN_WINDOW = 15  # Consider only this range of tokens around the keyword
+APPLY_SIGMA = False  # Option to apply Gaussian weighting
+MAX_LENGTH = 30  # BERT 모델의 최대 길이
 SPLIT_LONG_SENTENCES = True  # 긴 문장을 자르는 옵션
 MAX_SENTENCE_LENGTH = 30  # 잘라낼 최대 문장 길이
 SPLIT_AROUND_KEYWORD = 30  # 키워드를 중심으로 자르는 길이
-USE_POS = True  # Use POS tagging if True
+USE_POS = True  # Use POS tokenization if True
 
 # Ensure joblib temporary directory is set
 temp_dir = './joblib_temp'
@@ -47,13 +47,13 @@ logger.info(f"Using device: {device}")
 bert_tokenizer = BertTokenizerFast.from_pretrained('beomi/kcbert-large')
 model = BertModel.from_pretrained('beomi/kcbert-large').to(device)
 
+# Load POS tagger
+kiwi = Kiwi()
+
 # Load stopwords from file
 stopwords_file = './stopwords.txt'
 with open(stopwords_file, 'r', encoding='utf-8') as f:
     stop_words = f.read().split()
-
-# Initialize Kiwi
-kiwi = Kiwi()
 
 # Function to remove stopwords
 def remove_stopwords(tokens):
@@ -69,10 +69,10 @@ def split_sentence(sentence, keyword, max_length, split_length):
         split_sentences.append(sentence[start:end])
     return split_sentences
 
-# Tokenization function using Kiwi for POS tagging
+# Tokenization function
 def tokenize(sentences, use_pos=USE_POS):
     if use_pos:
-        return [" ".join([f"{token.form}/{token.tag}" for token in kiwi.tokenize(sentence)]) for sentence in sentences]
+        return [kiwi.tokenize(sentence) for sentence in sentences]
     else:
         return [bert_tokenizer.tokenize(sentence) for sentence in sentences]
 
@@ -89,7 +89,7 @@ def get_weighted_embeddings(sentences, tfidf_vectorizer, tfidf_matrix, keyword=K
     # Calculate weights
     weights = []
     for i, sentence in enumerate(sentences):
-        sentence_tokens = tokens[i].split()
+        sentence_tokens = tokens[i]
         sentence_tokens = remove_stopwords(sentence_tokens)
         tfidf_weights = np.array([tfidf_matrix[i, tfidf_vectorizer.vocabulary_.get(token, 0)] for token in sentence_tokens if tfidf_vectorizer.vocabulary_.get(token, 0) > 0])
         
@@ -107,7 +107,13 @@ def get_weighted_embeddings(sentences, tfidf_vectorizer, tfidf_matrix, keyword=K
                 distance_weights = np.ones_like(distances)
             full_weight = np.ones(token_length)
             full_weight[start_index:end_index] = distance_weights
-            full_weight = full_weight[:len(tfidf_weights)] * tfidf_weights
+            
+            # Align lengths of full_weight and tfidf_weights
+            min_length = min(len(full_weight), len(tfidf_weights))
+            full_weight = full_weight[:min_length]
+            tfidf_weights = tfidf_weights[:min_length]
+            
+            full_weight = full_weight * tfidf_weights
             weights.append(full_weight)
         else:
             weights.append(np.ones(token_length))
@@ -153,7 +159,7 @@ sentences_with_tail = shuffle(sentences_with_tail)
 
 # Fit TF-IDF Vectorizer on the entire corpus
 logger.info("Fitting TF-IDF Vectorizer on the entire corpus...")
-tfidf_vectorizer = TfidfVectorizer(tokenizer=lambda x: x.split(), stop_words=stop_words, token_pattern=None)
+tfidf_vectorizer = TfidfVectorizer(tokenizer=bert_tokenizer.tokenize, stop_words=stop_words, token_pattern=None)
 tfidf_matrix = tfidf_vectorizer.fit_transform(sentences_with_tail)
 
 # Generate weighted embeddings with progress tracking and batch processing
